@@ -1,4 +1,4 @@
-# CSC 501 Project 2: Memory Container
+#CSC 501 Project 2: Memory Container
 
 ## Overview
 In the previous project, you have experienced the power of adding a new abstraction, resource containers, in the system and use that as another way to schedule/allocate computing resource for tasks (e.g., processes, threads). In addition to processors, memory is another resource that tasks can share and resource containers can potentially help to manage.
