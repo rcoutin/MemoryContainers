@@ -54,30 +54,38 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
 
 int memory_container_lock(struct memory_container_cmd __user *user_cmd)
 {
+    // Write lock
     return 0;
 }
 
 
 int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
 {
+    // Write unlock
     return 0;
 }
 
 
 int memory_container_delete(struct memory_container_cmd __user *user_cmd)
 {
+    // Lookup container
+    // Lookup process in container and delete it
+    // Delete container if empty
     return 0;
 }
 
 
 int memory_container_create(struct memory_container_cmd __user *user_cmd)
 {
+    // Create a container if container with CID is not present
+    // Add current process to container
     return 0;
 }
 
 
 int memory_container_free(struct memory_container_cmd __user *user_cmd)
 {
+    // Write method to free
     return 0;
 }
 
