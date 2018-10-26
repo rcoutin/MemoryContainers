@@ -13,3 +13,6 @@ benchmark/benchmark
 benchmark/validate
 grade/benchmark
 .vscode
+*.log
+trace
+sorted_trace

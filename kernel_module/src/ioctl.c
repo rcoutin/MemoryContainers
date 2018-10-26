@@ -45,6 +45,18 @@
 #include <linux/sched.h>
 #include <linux/kthread.h>
 
+// Global container list
+struct container* container_list = NULL;
+struct mutex* lock = NULL;
+// Structures for containers and threads
+
+// Containers
+struct container{
+    __u64 container_id;
+    struct container* next;
+    struct container* prev;
+    struct mutex * local_lock;
+};
 
 int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
 {
