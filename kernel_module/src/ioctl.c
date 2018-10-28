@@ -61,34 +61,19 @@ struct task{
 // Containers
 struct container{
     __u64 container_id;
-    char* start_data;
+    //char* start_data;
+    struct mem_obj* obj_head;
     struct container* next;
     struct container* prev;
     struct mutex * local_lock;
     struct task* task_head;
+    int obj_size;
 };
 
-
-int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
-{
-    //void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
-    printk("%lu\n",vma->vm_start);
-    printk("%lu\n",vma->vm_end);
-    //get the oid and object size here
-
-
-    //check if memory has already been allocated
-
-        // allocate memory to the object
-
-    // map it to start_data?
-
-
-
-    // allocate memory 
-
-    return 0;
-}
+struct mem_obj {
+    char* data;
+    struct mem_obj* next;
+};
 
 struct container* find_container(pid_t pid){
     printk("Finding container for task %d\n", pid);
@@ -110,6 +95,57 @@ struct container* find_container(pid_t pid){
     }
     printk("Could not find container for task!");
     return NULL;
+}
+
+
+int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
+{
+    //void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
+    printk("%lu\n",vma->vm_start);
+    printk("%lu\n",vma->vm_end);
+    //get the oid and object size here
+
+    //get the container for this task
+
+    struct container* cont = find_container(current->pid);
+
+    if(cont!=NULL){
+        //check if memory has already been allocated in the container
+        if(cont-> obj_head == NULL){
+
+
+
+        }else{
+
+            //look for the page/object based on the offset? or 
+
+
+        }
+
+
+
+
+
+
+    }else{
+        printk("Could not find container in mmap");
+    }
+
+
+
+
+
+        // go to the i'th offset
+
+        // allocate memory to the object
+
+    // map it to start_data?
+
+
+
+    // allocate memory 
+
+    return 0;
 }
 
 
