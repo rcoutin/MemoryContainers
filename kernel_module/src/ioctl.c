@@ -54,8 +54,8 @@ struct mutex* lock = NULL;
 // Tasks
 struct task{
     pid_t pid;
-    task* next;
-    task* prev;
+    struct task* next;
+    struct task* prev;
 };
 
 // Containers
@@ -65,7 +65,7 @@ struct container{
     struct container* next;
     struct container* prev;
     struct mutex * local_lock;
-    task* tasks;
+    struct task* task_head;
 };
 
 
@@ -86,6 +86,32 @@ int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
     // Write unlock
     return 0;
 }
+
+// Thread Linked Lists
+int add_task(struct container* container){
+    struct task* current_task = (struct task*) kcalloc(1, sizeof(struct task), GFP_KERNEL);
+    printk("KKK Adding a task to the container %d", current->pid);
+
+    // allocating memory and assigning current threads task_struct
+    current_task->pid = current->pid;
+    current_task->prev = NULL;
+
+    //take a lock using the containers local mutex
+    mutex_lock(container->local_lock);
+
+    //add task to the head
+    struct task *temp = container->task_head;
+    current_task->next = temp;
+    container->task_head = current_task;
+    if(temp!=NULL){
+        temp->prev = current_task;
+    }
+
+    printk(" KKK Added thread to the container %d", container->task_head->pid);
+    mutex_unlock(container->local_lock);
+    return 0;
+}
+
 
 // Lookup container by id
 struct container* lookup_container(__u64 cid){
@@ -171,7 +197,7 @@ int memory_container_create(struct memory_container_cmd __user *user_cmd)
     mutex_lock(lock);
     ret = copy_from_user(&kmemory_container_cmd, user_cmd, sizeof(struct memory_container_cmd));
     if(ret==0){
-        printk("Thread ID: %d CID: %llu", task->pid, kmemory_container_cmd.cid);
+        printk("Task ID: %d CID: %llu", current->pid, kmemory_container_cmd.cid);
 
         //lock here
         printk("Create: Obtaining lock");
