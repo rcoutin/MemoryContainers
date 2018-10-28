@@ -71,19 +71,87 @@ struct container{
 
 int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
 {
+    //void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
+    printk("%lu\n",vma->vm_start);
+    printk("%lu\n",vma->vm_end);
+    //get the oid and object size here
+
+
+    //check if memory has already been allocated
+
+        // allocate memory to the object
+
+    // map it to start_data?
+
+
+
+    // allocate memory 
+
     return 0;
 }
 
+struct container* find_container(pid_t pid){
+    printk("Finding container for task %d\n", pid);
+    struct container* cur = container_list;
+    while(cur!=NULL){
+
+        struct task* cur_task = cur -> task_head;
+
+        while(cur_task!=NULL){
+            if(cur_task -> pid == pid){
+                printk("Found container %lld for task %d\n",cur->container_id, pid);
+                return cur;
+            }
+            else{
+                cur_task = cur_task -> next;
+            }
+        }
+        cur = cur -> next;
+    }
+    printk("Could not find container for task!");
+    return NULL;
+}
+
+
 int memory_container_lock(struct memory_container_cmd __user *user_cmd)
 {
-    // Write lock
+    
+    struct memory_container_cmd kmemory_container_cmd;
+    unsigned long ret = copy_from_user(&kmemory_container_cmd, user_cmd, sizeof(struct memory_container_cmd));
+
+    struct container* lookup_cont;
+    // find out which container the process that called this function belongs to 
+    if(ret==0){
+        lookup_cont = find_container(current->pid);
+        if (lookup_cont!=NULL){
+             mutex_lock(lookup_cont -> local_lock);
+        }
+
+    }else{
+        printk("Copy from user in lock failed");
+    }
+
     return 0;
 }
 
 
 int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
 {
-    // Write unlock
+   struct memory_container_cmd kmemory_container_cmd;
+    unsigned long ret = copy_from_user(&kmemory_container_cmd, user_cmd, sizeof(struct memory_container_cmd));
+
+    struct container* lookup_cont;
+    // find out which container the process that called this function belongs to 
+    if(ret==0){
+        lookup_cont = find_container(current->pid);
+        if (lookup_cont!=NULL){
+             mutex_unlock(lookup_cont -> local_lock);
+        }
+
+    }else{
+        printk("Copy from user in lock failed");
+    }
+
     return 0;
 }
 
@@ -107,7 +175,7 @@ int add_task(struct container* container){
         temp->prev = current_task;
     }
 
-    printk(" KKK Added thread to the container %d", container->task_head->pid);
+    printk(" KKK Added task to the container %d", container->task_head->pid);
     mutex_unlock(container->local_lock);
     return 0;
 }
