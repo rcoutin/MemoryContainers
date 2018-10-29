@@ -121,22 +121,13 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
             //look for the page/object based on the offset? or f
             printk("Found container. Reallocing");
         }
-        // virt_to_phys(volatile void * cont->cont_mem[vma->vm_pgoff]);
-    }else{
+        phys_addr_t pfn = virt_to_phys(cont->cont_mem + obj_size*vma->vm_pgoff) >> PAGE_SHIFT;
+        return remap_pfn_range(vma, vma->vm_start, pfn, obj_size, vma->vm_page_prot);
+    }else {
         printk("Could not find container in mmap");
     }
 
-        // go to the i'th offset
-
-        // allocate memory to the object
-
-    // map it to start_data?
-
-
-
-    // allocate memory 
-
-    return 0;
+    return -1;
 }
 
 
