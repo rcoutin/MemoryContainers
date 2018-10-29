@@ -101,10 +101,10 @@ struct container* find_container(pid_t pid){
 int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
 {
     //void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
-    printk("%lu\n",vma->vm_start);
+    printk("\n%lu\n",vma->vm_start);
     printk("%lu\n",vma->vm_end);
     //get the oid and object size here
-
+    printk("%lu\n",vma->vm_pgoff);
     //get the container for this task
 
     struct container* cont = find_container(current->pid);
@@ -130,10 +130,6 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
     }else{
         printk("Could not find container in mmap");
     }
-
-
-
-
 
         // go to the i'th offset
 
