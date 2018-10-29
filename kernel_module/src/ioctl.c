@@ -61,18 +61,12 @@ struct task{
 // Containers
 struct container{
     __u64 container_id;
-    //char* start_data;
-    struct mem_obj* obj_head;
+    char* cont_mem;
     struct container* next;
     struct container* prev;
     struct mutex * local_lock;
     struct task* task_head;
-    int obj_size;
-};
-
-struct mem_obj {
-    char* data;
-    struct mem_obj* next;
+    unsigned long count;
 };
 
 struct container* find_container(pid_t pid){
@@ -107,26 +101,27 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
     printk("%lu\n",vma->vm_pgoff);
     //get the container for this task
 
+    mutex_lock(lock);
     struct container* cont = find_container(current->pid);
+    mutex_unlock(lock);
 
+    printk("Container ID: %lu, Process ID: %ld", cont->container_id, current->pid);
     if(cont!=NULL){
         //check if memory has already been allocated in the container
-        if(cont-> obj_head == NULL){
-
-
-
+        unsigned long obj_size = vma->vm_end-vma->vm_start;
+        if(cont-> cont_mem == NULL){
+            cont->cont_mem = (char*) kcalloc(1, obj_size, GFP_KERNEL);
+            cont->count = 1;
+            printk("Found container. Callocing.");
         }else{
-
-            //look for the page/object based on the offset? or 
-
-
+            if((cont->count)-1 < vma->vm_pgoff){
+                cont->cont_mem = (char*) krealloc(cont->cont_mem, obj_size*(cont->count)*2, GFP_KERNEL);
+                cont->count = (cont->count)*2;
+            }
+            //look for the page/object based on the offset? or f
+            printk("Found container. Reallocing");
         }
-
-
-
-
-
-
+        // virt_to_phys(volatile void * cont->cont_mem[vma->vm_pgoff]);
     }else{
         printk("Could not find container in mmap");
     }
@@ -154,7 +149,9 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
     struct container* lookup_cont;
     // find out which container the process that called this function belongs to 
     if(ret==0){
+        mutex_lock(lock);
         lookup_cont = find_container(current->pid);
+        mutex_unlock(lock);
         if (lookup_cont!=NULL){
              mutex_lock(lookup_cont -> local_lock);
         }
@@ -175,7 +172,9 @@ int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
     struct container* lookup_cont;
     // find out which container the process that called this function belongs to 
     if(ret==0){
+        mutex_lock(lock);
         lookup_cont = find_container(current->pid);
+        mutex_unlock(lock);
         if (lookup_cont!=NULL){
              mutex_unlock(lookup_cont -> local_lock);
         }
