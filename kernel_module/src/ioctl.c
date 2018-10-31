@@ -150,23 +150,34 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
         printk("Container ID: %lu, Process ID: %ld", cont->container_id, current->pid);
         if(cont!=NULL){
             //check if memory has already been allocated in the container
-            
+            printk("About to start creating locks 1");
             if(cont-> locks == NULL){
                 cont->locks = (struct mutex**) kcalloc(1, sizeof(struct mutex *),GFP_KERNEL);
                 cont->count_locks = 1;
+                printk("Craeted first lock 2");
             }
+            printk("Craeted first lock 3");
             if((cont->count_locks)-1 < kmemory_container_cmd.oid){
                 cont->locks = (struct mutex**) krealloc(cont->locks, sizeof(struct mutex *)*(cont->count_locks)*2,GFP_KERNEL);
+                int i = 0;
+                for(i=cont->count_locks; i<cont->count_locks*2; i++){
+                    cont->locks[cont->count_locks] = NULL;
+                }
                 cont->count_locks *= 2;
+                printk("Realloced lock 4");
             }
-
+            printk("Realloced lock 5");
+            printk("Vijay %llu", cont->locks[kmemory_container_cmd.oid]);
             if(cont->locks[kmemory_container_cmd.oid]==NULL){
                 //kalloc the oid'th position here
                 cont->locks[kmemory_container_cmd.oid]  = (struct mutex*) kcalloc(1, sizeof(struct mutex),GFP_KERNEL);
                 mutex_init(cont->locks[kmemory_container_cmd.oid]);
+                printk("Init lock 6");
             }
+            printk("Init lock 7");
             //acquire the lock
             mutex_lock(cont->locks[kmemory_container_cmd.oid]);
+            printk("Lock done lock 8");
             // if ( cont -> cont_mem[kmemory_container_cmd.oid].obj_lock == NULL){
             //     struct mutex *lock = (struct mutex *) kcalloc(1, sizeof(struct mutex),GFP_KERNEL);
             //     mutex_init(lock);
