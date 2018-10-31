@@ -61,18 +61,14 @@ struct task{
 // Containers
 struct container{
     __u64 container_id;
-    struct object* cont_mem;
+    char* cont_mem;
     struct container* next;
     struct container* prev;
     struct mutex * local_lock;
     struct task* task_head;
     unsigned long count;
-};
-
-struct object{
-    __u64 obj_id;
-    char* data;
-    struct mutex* obj_lock;
+    struct mutex** locks;
+    unsigned long count_locks;
 };
 
 struct container* find_container(pid_t pid){
@@ -112,24 +108,34 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
     mutex_lock(lock);
     struct container* cont = find_container(current->pid);
     mutex_unlock(lock);
-
-
-    unsigned long obj_size = vma->vm_end - vma->vm_start;
-    cont -> cont_mem[vma->vm_pgoff].data = (char*) kcalloc (1,obj_size,GFP_KERNEL);
-        
-    cont ->  cont_mem[vma->vm_pgoff].obj_id = vma->vm_pgoff;
-
-    printk("Initialized lock %d", current->pid);
     
-    phys_addr_t pfn = virt_to_phys(cont->cont_mem[vma->vm_pgoff].data) >> PAGE_SHIFT;
+    unsigned long obj_size = vma->vm_end - vma->vm_start;
+
+    printk("Container ID: %lu, Process ID: %ld", cont->container_id, current->pid);
+    if(cont!=NULL){
+        //check if memory has already been allocated in the container
+        
+        if(cont-> cont_mem == NULL){
+            cont -> cont_mem = (char *) kcalloc(1,obj_size,GFP_KERNEL);
+        }
+
+        if((cont->count)-1 < vma->vm_pgoff){
+            cont->cont_mem = (char*) krealloc(cont->cont_mem, sizeof(char)*(cont->count)*2, GFP_KERNEL);
+            cont->count = (cont->count)*2;
+            printk("Found container. Reallocing");
+        }
+
+    }else{
+        printk("Could not find container at mcontainer lock");
+    }
+    
+    phys_addr_t pfn = virt_to_phys(cont->cont_mem + (obj_size*vma->vm_pgoff)) >> PAGE_SHIFT;
     printk("finished mmap for task %d\n", current->pid);
     return remap_pfn_range(vma, vma->vm_start, pfn, obj_size, vma->vm_page_prot);
 }
 
 int memory_container_lock(struct memory_container_cmd __user *user_cmd)
 {
-    
-
     struct memory_container_cmd kmemory_container_cmd;
     unsigned long ret = copy_from_user(&kmemory_container_cmd, user_cmd, sizeof(struct memory_container_cmd));
     printk("started mcontainer lock for task %d and object id %llu \n", current->pid,kmemory_container_cmd.oid);
@@ -145,24 +151,28 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
         if(cont!=NULL){
             //check if memory has already been allocated in the container
             
-            if(cont-> cont_mem == NULL){
-                cont->cont_mem = (struct object*) kcalloc(1, sizeof(struct object), GFP_KERNEL);
-                cont->count = 1;
-                printk("Found container. Callocing.");
-            }else{
-                if((cont->count)-1 < kmemory_container_cmd.oid){
-                    cont->cont_mem = (struct object*) krealloc(cont->cont_mem, sizeof(struct object)*(cont->count)*2, GFP_KERNEL);
-                    cont->count = (cont->count)*2;
-                    printk("Found container. Reallocing");
-                }
-                //look for the page/object based on the offset? or f
+            if(cont-> locks == NULL){
+                cont->locks = (struct mutex**) kcalloc(1, sizeof(struct mutex *),GFP_KERNEL);
+                cont->count_locks = 1;
             }
-            if ( cont -> cont_mem[kmemory_container_cmd.oid].obj_lock == NULL){
-                struct mutex *lock = (struct mutex *) kcalloc(1, sizeof(struct mutex),GFP_KERNEL);
-                mutex_init(lock);
-                cont -> cont_mem[kmemory_container_cmd.oid].obj_lock = lock;
+            if((cont->count_locks)-1 < kmemory_container_cmd.oid){
+                cont->locks = (struct mutex**) krealloc(cont->locks, sizeof(struct mutex *)*(cont->count_locks)*2,GFP_KERNEL);
+                cont->count_locks *= 2;
             }
-            mutex_lock(cont -> cont_mem[kmemory_container_cmd.oid].obj_lock);
+
+            if(cont->locks[kmemory_container_cmd.oid]==NULL){
+                //kalloc the oid'th position here
+                cont->locks[kmemory_container_cmd.oid]  = (struct mutex*) kcalloc(1, sizeof(struct mutex),GFP_KERNEL);
+                mutex_init(cont->locks[kmemory_container_cmd.oid]);
+            }
+            //acquire the lock
+            mutex_lock(cont->locks[kmemory_container_cmd.oid]);
+            // if ( cont -> cont_mem[kmemory_container_cmd.oid].obj_lock == NULL){
+            //     struct mutex *lock = (struct mutex *) kcalloc(1, sizeof(struct mutex),GFP_KERNEL);
+            //     mutex_init(lock);
+            //     cont -> cont_mem[kmemory_container_cmd.oid].obj_lock = lock;
+            // }
+            // mutex_lock(cont -> cont_mem[kmemory_container_cmd.oid].obj_lock);
             printk("acquired mcontainer lock for task %d and object id %llu \n", current->pid,kmemory_container_cmd.oid);
 
         }else{
@@ -194,8 +204,7 @@ int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
         mutex_unlock(lock);
         
         if (lookup_cont!=NULL){
-            
-            mutex_unlock(lookup_cont -> cont_mem[kmemory_container_cmd.oid].obj_lock);
+            mutex_unlock(lookup_cont->locks[kmemory_container_cmd.oid]);
             printk("released lock for task %d and object id %llu \n", current->pid,kmemory_container_cmd.oid);
         }
 
@@ -369,10 +378,16 @@ int add_container(struct container* lookup_cont, __u64 cid){
 
         struct mutex* container_lock = (struct mutex*) kcalloc(1,sizeof(struct mutex),GFP_KERNEL);
         mutex_init(container_lock);
+
         new_head->local_lock = container_lock;
         new_head->container_id = cid;
         new_head->next = container_list;
         new_head->prev = NULL;
+
+        // new_head->cont_mem = (struct object*) kcalloc(1, sizeof(struct object), GFP_KERNEL);
+        // new_head->count = 1;
+        // new_head->lock = (struct mutex *) kcalloc(1, sizeof(struct mutex),GFP_KERNEL);
+        // mutex_init(new_head->lock);
 
         if(container_list!=NULL){
             container_list->prev = new_head;
