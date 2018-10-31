@@ -75,10 +75,6 @@ struct object{
     struct mutex* obj_lock;
 };
 
-
-
-
-
 struct container* find_container(pid_t pid){
     printk("Finding container for task %d\n", pid);
     struct container* cur = container_list;
@@ -104,6 +100,8 @@ struct container* find_container(pid_t pid){
 
 int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
 {
+    printk("mmap for task %d\n", current->pid);
+
     //void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
     printk("\n%lu\nvm_start: ",vma->vm_start);
     printk("%lu\nvm_end: ",vma->vm_end);
@@ -114,25 +112,27 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
     mutex_lock(lock);
     struct container* cont = find_container(current->pid);
     mutex_unlock(lock);
+
+
     unsigned long obj_size = vma->vm_end - vma->vm_start;
-    cont -> cont_mem[vma->vm_pgoff].data = ( char*) kcalloc (1,obj_size,GFP_KERNEL);
+    cont -> cont_mem[vma->vm_pgoff].data = (char*) kcalloc (1,obj_size,GFP_KERNEL);
         
     cont ->  cont_mem[vma->vm_pgoff].obj_id = vma->vm_pgoff;
 
     printk("Initialized lock %d", current->pid);
     
     phys_addr_t pfn = virt_to_phys(cont->cont_mem[vma->vm_pgoff].data) >> PAGE_SHIFT;
+    printk("finished mmap for task %d\n", current->pid);
     return remap_pfn_range(vma, vma->vm_start, pfn, obj_size, vma->vm_page_prot);
 }
 
 int memory_container_lock(struct memory_container_cmd __user *user_cmd)
 {
     
+
     struct memory_container_cmd kmemory_container_cmd;
     unsigned long ret = copy_from_user(&kmemory_container_cmd, user_cmd, sizeof(struct memory_container_cmd));
-
-    struct container* lookup_cont;
-
+    printk("started mcontainer lock for task %d and object id %llu \n", current->pid,kmemory_container_cmd.oid);
     // find out which container the process that called this function belongs to 
     if(ret==0){
         mutex_lock(lock);
@@ -157,18 +157,23 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
                 }
                 //look for the page/object based on the offset? or f
             }
-        }   
+            if ( cont -> cont_mem[kmemory_container_cmd.oid].obj_lock == NULL){
+                struct mutex *lock = (struct mutex *) kcalloc(1, sizeof(struct mutex),GFP_KERNEL);
+                mutex_init(lock);
+                cont -> cont_mem[kmemory_container_cmd.oid].obj_lock = lock;
+            }
+            mutex_lock(cont -> cont_mem[kmemory_container_cmd.oid].obj_lock);
+            printk("acquired mcontainer lock for task %d and object id %llu \n", current->pid,kmemory_container_cmd.oid);
 
-        if ( cont -> cont_mem[kmemory_container_cmd.oid].obj_lock == NULL){
-            struct mutex *lock = (struct mutex *) kcalloc(1, sizeof(struct mutex),GFP_KERNEL);
-            mutex_init(lock);
-            cont -> cont_mem[kmemory_container_cmd.oid].obj_lock = lock;
+        }else{
+            printk("Could not find container at mcontainer lock");
         }
-        mutex_lock(cont -> cont_mem[kmemory_container_cmd.oid].obj_lock);
-        
+
+       
     }else{
         printk("Copy from user in lock failed");
     }
+    printk("finished mcontainer lock for task %d and object id %llu \n", current->pid,kmemory_container_cmd.oid);
 
     return 0;
 }
@@ -176,8 +181,10 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
 
 int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
 {
+
     struct memory_container_cmd kmemory_container_cmd;
     unsigned long ret = copy_from_user(&kmemory_container_cmd, user_cmd, sizeof(struct memory_container_cmd));
+    printk("started mcontainer unlock for task %d and object id %llu \n", current->pid,kmemory_container_cmd.oid);
 
     struct container* lookup_cont;
     // find out which container the process that called this function belongs to 
@@ -189,11 +196,13 @@ int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
         if (lookup_cont!=NULL){
             
             mutex_unlock(lookup_cont -> cont_mem[kmemory_container_cmd.oid].obj_lock);
+            printk("released lock for task %d and object id %llu \n", current->pid,kmemory_container_cmd.oid);
         }
 
     }else{
         printk("Copy from user in lock failed");
     }
+    printk("finished mcontainer unlock for task %d and object id %llu \n", current->pid,kmemory_container_cmd.oid);
 
     return 0;
 }
@@ -330,7 +339,9 @@ int memory_container_delete(struct memory_container_cmd __user *user_cmd)
     }
     // Lookup container
     printk("In delete lookup");
+    mutex_lock(lock);
     cont = lookup_container(kmemory_container_cmd.cid);
+    mutex_unlock(lock);
     if(cont!=NULL){
         delete_task(cont);
         printk("Deleted task");
