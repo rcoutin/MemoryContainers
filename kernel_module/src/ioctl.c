@@ -61,7 +61,7 @@ struct task{
 // Containers
 struct container{
     __u64 container_id;
-    char* cont_mem;
+    char** cont_mem;
     struct container* next;
     struct container* prev;
     struct mutex * local_lock;
@@ -72,8 +72,8 @@ struct container{
 };
 
 struct container* find_container(pid_t pid){
-    printk("Finding container for task %d\n", pid);
     struct container* cur = container_list;
+    printk("Finding container for task %d\n", pid);
     while(cur!=NULL){
 
         struct task* cur_task = cur -> task_head;
@@ -96,6 +96,10 @@ struct container* find_container(pid_t pid){
 
 int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
 {
+    
+    struct container* cont;
+    phys_addr_t pfn;
+    unsigned long obj_size;
     printk("mmap for task %d\n", current->pid);
 
     //void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
@@ -106,48 +110,59 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
     //get the container for this task
 
     mutex_lock(lock);
-    struct container* cont = find_container(current->pid);
+    cont = find_container(current->pid);
     mutex_unlock(lock);
     
-    unsigned long obj_size = vma->vm_end - vma->vm_start;
+    obj_size = vma->vm_end - vma->vm_start;
 
-    printk("Container ID: %lu, Process ID: %ld", cont->container_id, current->pid);
+    printk("Container ID: %llu, Process ID: %d", cont->container_id, current->pid);
     if(cont!=NULL){
         //check if memory has already been allocated in the container
         
         if(cont-> cont_mem == NULL){
-            cont -> cont_mem = (char *) kcalloc(1,obj_size,GFP_KERNEL);
+            cont -> cont_mem = (char **) kcalloc(1,sizeof(char *),GFP_KERNEL);
+            cont -> count = 1;
         }
 
         if((cont->count)-1 < vma->vm_pgoff){
-            cont->cont_mem = (char*) krealloc(cont->cont_mem, sizeof(char)*(cont->count)*2, GFP_KERNEL);
+            cont->cont_mem = (char**) krealloc(cont->cont_mem, sizeof(char*)*(cont->count)*2, GFP_KERNEL);
+            int i = 0;
+            for(i = cont->count;i<cont->count*2 ;i++){
+                cont->cont_mem[i]=NULL;
+            }
             cont->count = (cont->count)*2;
             printk("Found container. Reallocing");
         }
 
+        if(cont->cont_mem[vma->vm_pgoff] ==NULL){
+            cont->cont_mem[vma->vm_pgoff] = (char *) kcalloc(1,obj_size,GFP_KERNEL);
+        }
     }else{
         printk("Could not find container at mcontainer lock");
     }
     
-    phys_addr_t pfn = virt_to_phys(cont->cont_mem + (obj_size*vma->vm_pgoff)) >> PAGE_SHIFT;
+    //pfn = virt_to_phys(cont->cont_mem + (obj_size*vma->vm_pgoff)) >> PAGE_SHIFT;
+    pfn = virt_to_phys(cont->cont_mem[vma->vm_pgoff]) >> PAGE_SHIFT;
     printk("finished mmap for task %d\n", current->pid);
     return remap_pfn_range(vma, vma->vm_start, pfn, obj_size, vma->vm_page_prot);
 }
 
 int memory_container_lock(struct memory_container_cmd __user *user_cmd)
 {
+    int i;
+    struct container* cont;
     struct memory_container_cmd kmemory_container_cmd;
     unsigned long ret = copy_from_user(&kmemory_container_cmd, user_cmd, sizeof(struct memory_container_cmd));
     printk("started mcontainer lock for task %d and object id %llu \n", current->pid,kmemory_container_cmd.oid);
     // find out which container the process that called this function belongs to 
     if(ret==0){
         mutex_lock(lock);
-        struct container* cont = find_container(current->pid);
+        cont = find_container(current->pid);
         mutex_unlock(lock);
 
         //accesss the offset'th object in this containers data
         
-        printk("Container ID: %lu, Process ID: %ld", cont->container_id, current->pid);
+        printk("Container ID: %llu, Process ID: %d", cont->container_id, current->pid);
         if(cont!=NULL){
             //check if memory has already been allocated in the container
             printk("About to start creating locks 1");
@@ -159,15 +174,14 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
             printk("Craeted first lock 3");
             if((cont->count_locks)-1 < kmemory_container_cmd.oid){
                 cont->locks = (struct mutex**) krealloc(cont->locks, sizeof(struct mutex *)*(cont->count_locks)*2,GFP_KERNEL);
-                int i = 0;
                 for(i=cont->count_locks; i<cont->count_locks*2; i++){
-                    cont->locks[cont->count_locks] = NULL;
+                    cont->locks[i] = NULL;
                 }
                 cont->count_locks *= 2;
                 printk("Realloced lock 4");
             }
             printk("Realloced lock 5");
-            printk("Vijay %llu", cont->locks[kmemory_container_cmd.oid]);
+            //printk("Pointer address %llu", cont->locks[kmemory_container_cmd.oid]);
             if(cont->locks[kmemory_container_cmd.oid]==NULL){
                 //kalloc the oid'th position here
                 cont->locks[kmemory_container_cmd.oid]  = (struct mutex*) kcalloc(1, sizeof(struct mutex),GFP_KERNEL);
@@ -178,12 +192,7 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
             //acquire the lock
             mutex_lock(cont->locks[kmemory_container_cmd.oid]);
             printk("Lock done lock 8");
-            // if ( cont -> cont_mem[kmemory_container_cmd.oid].obj_lock == NULL){
-            //     struct mutex *lock = (struct mutex *) kcalloc(1, sizeof(struct mutex),GFP_KERNEL);
-            //     mutex_init(lock);
-            //     cont -> cont_mem[kmemory_container_cmd.oid].obj_lock = lock;
-            // }
-            // mutex_lock(cont -> cont_mem[kmemory_container_cmd.oid].obj_lock);
+
             printk("acquired mcontainer lock for task %d and object id %llu \n", current->pid,kmemory_container_cmd.oid);
 
         }else{
@@ -203,11 +212,11 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
 int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
 {
 
+    struct container* lookup_cont;
     struct memory_container_cmd kmemory_container_cmd;
     unsigned long ret = copy_from_user(&kmemory_container_cmd, user_cmd, sizeof(struct memory_container_cmd));
     printk("started mcontainer unlock for task %d and object id %llu \n", current->pid,kmemory_container_cmd.oid);
 
-    struct container* lookup_cont;
     // find out which container the process that called this function belongs to 
     if(ret==0){
         mutex_lock(lock);
@@ -257,14 +266,13 @@ struct container* lookup_container(__u64 cid){
     // take a lock on the global container list
     struct container* cur;
     printk("Looking up container;before lock %d", current->pid);
-    //mutex_lock(lock);
     printk("Look up container acquired lock %d", current->pid);
     cur = container_list;
 
     while (cur != NULL){
         printk("Container ID : %llu",cur ->container_id);
         if(cur -> container_id == cid){
-            //mutex_unlock(lock);
+
             printk("Found container, unlocked %d", current->pid);
             return cur;
         }else{
@@ -278,6 +286,7 @@ struct container* lookup_container(__u64 cid){
 
 
 void delete_container(struct container* container){
+    int i;
     printk("Delete container, before lock %d", current->pid);
     mutex_lock(lock);
     printk("Delete container, acquired lock %d", current->pid);
@@ -295,15 +304,24 @@ void delete_container(struct container* container){
         printk("Freed container %llu by %d",container->container_id, current->pid);
 
         mutex_unlock(container->local_lock);
-        mutex_destroy(container->local_lock);
-        kfree(container->local_lock);
+        // mutex_destroy(container->local_lock);
+        // kfree(container->local_lock);
         container-> local_lock = NULL;
         container->next = NULL;
         container-> prev = NULL;
+
+        // kfree(container->cont_mem);
+        // container->cont_mem = NULL;
+
+        // for(i = 0;i<container->count_locks;i++){
+        //     kfree(container->locks[i]);
+        //     container->locks[i] = NULL;
+        // }
+    // struct mutex** locks;
+
     }
     mutex_unlock(lock);
     printk("Delete container, released lock %d", current->pid);
-   
 }
 
 int delete_task(struct container* container){
@@ -328,10 +346,9 @@ int delete_task(struct container* container){
                 cur=NULL;
 
                 if(container->task_head == NULL){
-                    delete_container(container);
-                    kfree(container);
-                    container=NULL;
-                    //no more tasks in this container, delete it and !!!UNLOCK THE ABOVE LOCAL LOCK!!!
+                    delete_container(container); // THE ABOVE LOCK mutex_lock(container->local_lock) IS UNLOCKED INSIDE
+                    //kfree(container);
+                    //container=NULL;
                 }
                 return 0;
             }else{
@@ -348,24 +365,17 @@ int delete_task(struct container* container){
 int memory_container_delete(struct memory_container_cmd __user *user_cmd)
 {
 
-    struct memory_container_cmd kmemory_container_cmd;
     struct container* cont;
-    unsigned long ret; 
-    //int delete_ret;
-    ret = copy_from_user(&kmemory_container_cmd, user_cmd, sizeof(struct memory_container_cmd));
-    if(ret!=0){
-        printk("copy_from_user failed. Couldn't delete. %d", current->pid);
-        return -1;
-    }
-    // Lookup container
+
+    // Lookup container by current thread id
     printk("In delete lookup");
     mutex_lock(lock);
-    cont = lookup_container(kmemory_container_cmd.cid);
+    cont = find_container(current->pid);
     mutex_unlock(lock);
-    if(cont!=NULL){
-        delete_task(cont);
-        printk("Deleted task");
-    }
+    // if(cont!=NULL){
+    //     delete_task(cont);
+    //     printk("Deleted task");
+    // }
 
     return 0;
 }
@@ -395,11 +405,6 @@ int add_container(struct container* lookup_cont, __u64 cid){
         new_head->next = container_list;
         new_head->prev = NULL;
 
-        // new_head->cont_mem = (struct object*) kcalloc(1, sizeof(struct object), GFP_KERNEL);
-        // new_head->count = 1;
-        // new_head->lock = (struct mutex *) kcalloc(1, sizeof(struct mutex),GFP_KERNEL);
-        // mutex_init(new_head->lock);
-
         if(container_list!=NULL){
             container_list->prev = new_head;
         }
@@ -408,8 +413,6 @@ int add_container(struct container* lookup_cont, __u64 cid){
         add_task(container_list);
         printk("Added container, unlocked %d", current->pid);
      }
-
-    //  mutex_unlock(lock);
      
     return 0;
 }
