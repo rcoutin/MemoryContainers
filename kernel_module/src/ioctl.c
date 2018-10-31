@@ -454,7 +454,28 @@ int memory_container_create(struct memory_container_cmd __user *user_cmd)
 
 int memory_container_free(struct memory_container_cmd __user *user_cmd)
 {
-    // Write method to free
+    struct container* lookup_cont;
+    struct memory_container_cmd kmemory_container_cmd;
+    unsigned long ret = copy_from_user(&kmemory_container_cmd, user_cmd, sizeof(struct memory_container_cmd));
+    printk("started mcontainer free for task %d and object id %llu \n", current->pid,kmemory_container_cmd.oid);
+
+    // find out which container the process that called this function belongs to 
+    if(ret==0){
+        
+        mutex_lock(lock);
+        lookup_cont = find_container(current->pid);
+        mutex_unlock(lock);
+        if(lookup_cont!=NULL){
+            //free the OID'th object in this container
+            kfree(lookup_cont->cont_mem[kmemory_container_cmd.oid]);
+            lookup_cont->cont_mem[kmemory_container_cmd.oid] = NULL;
+        }
+
+    }else{
+        printk("Copy from user in lock failed");
+    }
+    printk("finished mcontainer free for task %d and object id %llu \n", current->pid,kmemory_container_cmd.oid);
+
     return 0;
 }
 
