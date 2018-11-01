@@ -50,14 +50,12 @@ struct container* container_list = NULL;
 struct mutex* lock = NULL;
 
 // Structures for containers and tasks
-
 // Tasks
 struct task{
     pid_t pid;
     struct task* next;
     struct task* prev;
 };
-
 // Containers
 struct container{
     __u64 container_id;
@@ -71,6 +69,55 @@ struct container{
     unsigned long count_locks;
 };
 
+/*
+    This method cleans up containers and their memory space when module is unloaded
+*/
+void cleanup_mem(void){
+    struct container* cur = container_list;
+    int i;
+    struct container* container;
+    //printk("In cleanup");
+    while(cur!=NULL){
+        container = cur;
+        cur = cur->next;
+        //printk("Cleaning up CID: %llu", container->container_id);
+        
+        for(i = 0;i<container->count_locks;i++){
+            kfree(container->locks[i]);
+            container->locks[i] = NULL;
+        }
+        kfree(container->locks);
+        container->locks = NULL;
+
+        for(i = 0;i<container->count;i++){
+            if(container->cont_mem[i] != NULL){
+                kfree(container->cont_mem[i]);
+                container->cont_mem[i] = NULL;
+            }else{
+                //printk("Didnt free object ID %d of container %llu in cleanup coz gone already", i, container->container_id);
+            }
+        }
+        kfree(container->cont_mem);
+        container->cont_mem = NULL;
+
+        mutex_destroy(container->local_lock);
+        kfree(container->local_lock);
+        container->local_lock = NULL;
+
+        kfree(container);
+        container=NULL;        
+    }
+    //printk("Cleaned up all!");
+    container_list=NULL;
+
+    mutex_destroy(lock);
+    kfree(lock);
+    lock=NULL;
+}
+
+/*
+    This method finds the container containing the current process
+*/
 struct container* find_container(pid_t pid){
     struct container* cur = container_list;
     //printk("Finding container for task %d\n", pid);
@@ -93,43 +140,6 @@ struct container* find_container(pid_t pid){
     return NULL;
 }
 
-void cleanup_mem(void){
-    struct container* cur = container_list;
-    int i;
-    struct container* container;
-    //printk("In cleanup");
-    while(cur!=NULL){
-        container = cur;
-        cur = cur->next;
-        //printk("Cleaning up CID: %llu", container->container_id);
-        mutex_destroy(container->local_lock);
-        kfree(container->local_lock);
-        container->local_lock = NULL;
-        for(i = 0;i<container->count_locks;i++){
-            kfree(container->locks[i]);
-            container->locks[i] = NULL;
-        }
-        for(i = 0;i<container->count;i++){
-            if(container->cont_mem[i] != NULL){
-                kfree(container->cont_mem[i]);
-                container->cont_mem[i] = NULL;
-            }else{
-                printk("Didnt free object ID %d of container %llu in cleanup coz gone already", i, container->container_id);
-            }
-        }
-        kfree(container->locks);
-        container->locks = NULL;
-        kfree(container->cont_mem);
-        container->cont_mem = NULL;
-        kfree(container);
-        container=NULL;
-    }
-    //printk("Cleaned up all!");
-    container_list=NULL;
-    mutex_destroy(lock);
-    kfree(lock);
-    lock=NULL;
-}
 
 int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
 {
@@ -155,14 +165,17 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
 
     //printk("Container ID: %llu, Process ID: %d", cont->container_id, current->pid);
     if(cont!=NULL){
-        //check if memory has already been allocated in the container
         
+        // Check if container memory is initilized
         if(cont-> cont_mem == NULL){
             cont -> cont_mem = (char **) kcalloc(1,sizeof(char *),GFP_KERNEL);
             cont -> count = 1;
         }
+
+        // Check if currently allocated memory in container is enough. If not, realloc array of pointers by doubling the size. 
         if((cont->count)-1 < vma->vm_pgoff){
             cont->cont_mem = (char**) krealloc(cont->cont_mem, sizeof(char*)*(cont->count)*2, GFP_KERNEL);
+            // Initialize reallocated memory to NULL
             for(i = cont->count;i<cont->count*2 ;i++){
                 cont->cont_mem[i]=NULL;
             }
@@ -170,6 +183,7 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
             //printk("Found container. Reallocing");
         }
 
+        // Allocate memory for object if not already allocated and point object pointer in the pointer array to the object.
         if(cont->cont_mem[vma->vm_pgoff] ==NULL){
             cont->cont_mem[vma->vm_pgoff] = (char *) kcalloc(1,obj_size,GFP_KERNEL);
         }
@@ -177,11 +191,15 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
         //printk("Could not find container at mcontainer lock");
     }
     
-    //pfn = virt_to_phys(cont->cont_mem + (obj_size*vma->vm_pgoff)) >> PAGE_SHIFT;
+    // Find physical memory page
     pfn = virt_to_phys(cont->cont_mem[vma->vm_pgoff]) >> PAGE_SHIFT;
     //printk("finished mmap for task %d\n", current->pid);
-    return remap_pfn_range(vma, vma->vm_start, pfn, obj_size, vma->vm_page_prot);
+
+    // Return new virtual page to user-space that is accessible through user-space
+    return remap_pfn_range(vma, vma->vm_start, pfn, obj_size, vma->vm_page_prot);    
 }
+
+
 
 int memory_container_lock(struct memory_container_cmd __user *user_cmd)
 {
@@ -272,7 +290,9 @@ int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
     return 0;
 }
 
-// Thread Linked Lists
+/*
+    This method adds current task to container.
+*/
 int add_task(struct container* container){
     struct task* current_task = (struct task*) kcalloc(1, sizeof(struct task), GFP_KERNEL);
     //printk("KKK Adding a task to the container %d", current->pid);
@@ -297,7 +317,9 @@ int add_task(struct container* container){
 }
 
 
-// Lookup container by id
+/*
+    This method checks if a container with given CID is already present.
+*/
 struct container* lookup_container(__u64 cid){
     // take a lock on the global container list
     struct container* cur;
@@ -320,7 +342,9 @@ struct container* lookup_container(__u64 cid){
     return NULL;
 }
 
-
+/*
+    This method deletes current task from container.
+*/
 int delete_task(struct container* container){
     mutex_lock(container->local_lock);
     if(container !=NULL){
@@ -371,8 +395,9 @@ int memory_container_delete(struct memory_container_cmd __user *user_cmd)
 }
 
 
-
-// Container Linked Lists
+/*
+    This method adds container to container list.
+*/
 int add_container(struct container* lookup_cont, __u64 cid){
     
     //lock the global container list before adding
@@ -447,7 +472,7 @@ int memory_container_free(struct memory_container_cmd __user *user_cmd)
     struct container* lookup_cont;
     struct memory_container_cmd kmemory_container_cmd;
     unsigned long ret = copy_from_user(&kmemory_container_cmd, user_cmd, sizeof(struct memory_container_cmd));
-    printk("started mcontainer free for task %d and object id %llu \n", current->pid,kmemory_container_cmd.oid);
+    //printk("started mcontainer free for task %d and object id %llu \n", current->pid,kmemory_container_cmd.oid);
 
     // find out which container the process that called this function belongs to 
     if(ret==0){
@@ -458,18 +483,18 @@ int memory_container_free(struct memory_container_cmd __user *user_cmd)
         if(lookup_cont!=NULL){
             //free the OID'th object in this container
             if(lookup_cont->cont_mem[kmemory_container_cmd.oid] != NULL){
-                printk("Freeing object ID %llu of container %llu", kmemory_container_cmd.oid, lookup_cont->container_id);
+                //printk("Freeing object ID %llu of container %llu", kmemory_container_cmd.oid, lookup_cont->container_id);
                 kfree(lookup_cont->cont_mem[kmemory_container_cmd.oid]);
                 lookup_cont->cont_mem[kmemory_container_cmd.oid] = NULL;
             }else{
-                printk("Didnt free object ID %llu of container %llu in cleanup coz gone already", kmemory_container_cmd.oid, lookup_cont->container_id);
+                //printk("Didnt free object ID %llu of container %llu in cleanup coz gone already", kmemory_container_cmd.oid, lookup_cont->container_id);
             }
         }
 
     }else{
         //printk("Copy from user in lock failed");
     }
-    printk("finished mcontainer free for task %d in container %llu and object id %llu \n", current->pid, lookup_cont->container_id,kmemory_container_cmd.oid);
+    //printk("finished mcontainer free for task %d in container %llu and object id %llu \n", current->pid, lookup_cont->container_id,kmemory_container_cmd.oid);
 
     return 0;
 }

@@ -50,6 +50,7 @@ extern void cleanup_mem(void);
 int memory_container_init(void)
 {
     int ret;
+    printk("New module initialization");
 
     if ((ret = misc_register(&memory_container_dev)))
     {
@@ -65,7 +66,9 @@ int memory_container_init(void)
 
 void memory_container_exit(void)
 {
-    printk("Printing this during exit");
+    //printk("Printing this during exit");
     cleanup_mem();
+    printk("Done with cleanup\n");
+    printk("\n");
     misc_deregister(&memory_container_dev);
 }
