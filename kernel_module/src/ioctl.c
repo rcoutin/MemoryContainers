@@ -62,12 +62,12 @@ struct task{
 struct container{
     __u64 container_id;
     char** cont_mem;
+    struct mutex** locks;
     struct container* next;
     struct container* prev;
     struct mutex * local_lock;
     struct task* task_head;
     unsigned long count;
-    struct mutex** locks;
     unsigned long count_locks;
 };
 
@@ -93,6 +93,39 @@ struct container* find_container(pid_t pid){
     return NULL;
 }
 
+void cleanup_mem(void){
+    struct container* cur = container_list;
+    int i;
+    struct container* container;
+    printk("In cleanup");
+    while(cur!=NULL){
+        container = cur;
+        cur = cur->next;
+        printk("Cleaning up CID: %llu", container->container_id);
+        mutex_destroy(container->local_lock);
+        kfree(container->local_lock);
+        container->local_lock = NULL;
+        for(i = 0;i<container->count_locks;i++){
+            kfree(container->locks[i]);
+            container->locks[i] = NULL;
+        }
+        for(i = 0;i<container->count;i++){
+            kfree(container->cont_mem[i]);
+            container->cont_mem[i] = NULL;
+        }
+        kfree(container->locks);
+        container->locks = NULL;
+        kfree(container->cont_mem);
+        container->cont_mem = NULL;
+        kfree(container);
+        container=NULL;
+    }
+    printk("Cleaned up all!");
+    container_list=NULL;
+    mutex_destroy(lock);
+    kfree(lock);
+    lock=NULL;
+}
 
 int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
 {
@@ -100,6 +133,7 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
     struct container* cont;
     phys_addr_t pfn;
     unsigned long obj_size;
+    int i;
     printk("mmap for task %d\n", current->pid);
 
     //void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
@@ -123,10 +157,8 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
             cont -> cont_mem = (char **) kcalloc(1,sizeof(char *),GFP_KERNEL);
             cont -> count = 1;
         }
-
         if((cont->count)-1 < vma->vm_pgoff){
             cont->cont_mem = (char**) krealloc(cont->cont_mem, sizeof(char*)*(cont->count)*2, GFP_KERNEL);
-            int i = 0;
             for(i = cont->count;i<cont->count*2 ;i++){
                 cont->cont_mem[i]=NULL;
             }
@@ -285,45 +317,6 @@ struct container* lookup_container(__u64 cid){
 }
 
 
-void delete_container(struct container* container){
-    int i;
-    printk("Delete container, before lock %d", current->pid);
-    mutex_lock(lock);
-    printk("Delete container, acquired lock %d", current->pid);
-    if(container!=NULL){
-        printk("Try to delete container %llu by %d",container->container_id, current->pid);
-        if(container -> next !=NULL){
-                container->next->prev = container->prev;
-        }
-        if(container->prev != NULL){
-            container->prev->next = container->next;
-           
-        }else{
-            container_list = container->next;
-        }
-        printk("Freed container %llu by %d",container->container_id, current->pid);
-
-        mutex_unlock(container->local_lock);
-        // mutex_destroy(container->local_lock);
-        // kfree(container->local_lock);
-        container-> local_lock = NULL;
-        container->next = NULL;
-        container-> prev = NULL;
-
-        // kfree(container->cont_mem);
-        // container->cont_mem = NULL;
-
-        // for(i = 0;i<container->count_locks;i++){
-        //     kfree(container->locks[i]);
-        //     container->locks[i] = NULL;
-        // }
-    // struct mutex** locks;
-
-    }
-    mutex_unlock(lock);
-    printk("Delete container, released lock %d", current->pid);
-}
-
 int delete_task(struct container* container){
     mutex_lock(container->local_lock);
     if(container !=NULL){
@@ -333,32 +326,25 @@ int delete_task(struct container* container){
             printk("Stored Thread %d.",cur -> pid);
             if(cur -> pid  == current -> pid){
                 printk("In delete task. Task found! %d", current->pid);
+                if(container -> task_head == cur){
+                    container -> task_head = cur->next;
+                }
                 if(cur -> next !=NULL){
                     cur->next->prev = cur->prev;
                 }
                 if(cur->prev != NULL){
                     cur->prev->next = cur->next;
-                
-                }else{
-                    container -> task_head = cur->next;
                 }
                 kfree(cur);
                 cur=NULL;
-
-                if(container->task_head == NULL){
-                    delete_container(container); // THE ABOVE LOCK mutex_lock(container->local_lock) IS UNLOCKED INSIDE
-                    //kfree(container);
-                    //container=NULL;
-                }
-                return 0;
+                break;
             }else{
                 cur = cur -> next;
             }
-        }  
+        }
     } 
-    if(container!=NULL){ // CAN BE NULL IF CONTAINER IS DELETED
-        mutex_unlock(container->local_lock);
-    }
+    mutex_unlock(container->local_lock);
+    printk("Freed lock PID: %d", current->pid);
     return -1;
 }
 
@@ -372,10 +358,10 @@ int memory_container_delete(struct memory_container_cmd __user *user_cmd)
     mutex_lock(lock);
     cont = find_container(current->pid);
     mutex_unlock(lock);
-    // if(cont!=NULL){
-    //     delete_task(cont);
-    //     printk("Deleted task");
-    // }
+    if(cont!=NULL){
+        delete_task(cont);
+        printk("Deleted task");
+    }
 
     return 0;
 }
@@ -487,6 +473,8 @@ int memory_container_free(struct memory_container_cmd __user *user_cmd)
 int memory_container_ioctl(struct file *filp, unsigned int cmd,
                               unsigned long arg)
 {
+    // struct memory_container_cmd kmemory_container_cmd;
+    // unsigned long  ret;
     switch (cmd)
     {
     case MCONTAINER_IOCTL_CREATE:

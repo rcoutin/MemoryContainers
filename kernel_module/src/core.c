@@ -45,7 +45,7 @@
 #include <linux/sched.h>
 
 extern struct miscdevice memory_container_dev;
-
+extern void cleanup_mem(void);
 
 int memory_container_init(void)
 {
@@ -65,5 +65,7 @@ int memory_container_init(void)
 
 void memory_container_exit(void)
 {
+    printk("Printing this during exit");
+    cleanup_mem();
     misc_deregister(&memory_container_dev);
 }
