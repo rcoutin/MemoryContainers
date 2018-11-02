@@ -81,35 +81,31 @@ void cleanup_mem(void){
         container = cur;
         cur = cur->next;
         //printk("Cleaning up CID: %llu", container->container_id);
-        
+        mutex_destroy(container->local_lock);
+        kfree(container->local_lock);
+        container->local_lock = NULL;
         for(i = 0;i<container->count_locks;i++){
+            mutex_destroy(container->locks[i]);
             kfree(container->locks[i]);
             container->locks[i] = NULL;
         }
-        kfree(container->locks);
-        container->locks = NULL;
-
         for(i = 0;i<container->count;i++){
             if(container->cont_mem[i] != NULL){
                 kfree(container->cont_mem[i]);
                 container->cont_mem[i] = NULL;
             }else{
-                //printk("Didnt free object ID %d of container %llu in cleanup coz gone already", i, container->container_id);
+                // printk("Didnt free object ID %d of container %llu in cleanup coz gone already", i, container->container_id);
             }
         }
+        kfree(container->locks);
+        container->locks = NULL;
         kfree(container->cont_mem);
         container->cont_mem = NULL;
-
-        mutex_destroy(container->local_lock);
-        kfree(container->local_lock);
-        container->local_lock = NULL;
-
         kfree(container);
-        container=NULL;        
+        container=NULL;
     }
     //printk("Cleaned up all!");
     container_list=NULL;
-
     mutex_destroy(lock);
     kfree(lock);
     lock=NULL;
