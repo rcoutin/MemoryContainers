@@ -22,10 +22,11 @@
 //
 ////////////////////////////////////////////////////////////////////////
 //
-//   Author:  Hung-Wei Tseng, Yu-Chia Liu
+//   Author:  Vijay Hebbar (vhhebbar), Rahul Coutinho (rcoutin)
 //
 //   Description:
-//     Core of Kernel Module for Processor Container
+//     Project 2 submission
+//     Core of Kernel Module for Memory Container
 //
 ////////////////////////////////////////////////////////////////////////
 
